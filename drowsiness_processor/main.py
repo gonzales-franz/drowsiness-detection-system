@@ -33,4 +33,5 @@ class DrowsinessDetectionSystem:
             sketch = self.visualizer.visualize_all_reports(sketch, drowsiness_features_processed)
             self.reports.main(drowsiness_features_processed)
             self.json_report = self.reports.generate_json_report(drowsiness_features_processed)
+
         return face_image, sketch, self.json_report
