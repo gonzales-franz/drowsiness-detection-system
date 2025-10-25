@@ -6,6 +6,23 @@ const CAMERA_CONFIG = {
   facingMode: 'user' as const,
 };
 
+// Helper function to convert Blob to Base64 asynchronously
+const blobToBase64 = (blob: Blob): Promise<string | null> => {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onloadend = () => {
+      if (typeof reader.result === 'string') {
+        // Remove the data URL prefix (e.g., "data:image/jpeg;base64,")
+        resolve(reader.result.split(',')[1] || null);
+      } else {
+        resolve(null);
+      }
+    };
+    reader.onerror = reject;
+    reader.readAsDataURL(blob);
+  });
+};
+
 export const useCamera = () => {
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -48,23 +65,43 @@ export const useCamera = () => {
     setIsCameraActive(false);
   }, []);
 
-  // SIMPLE: Usar toDataURL sincrónico
-  const captureFrame = useCallback((): string | null => {
-    if (!videoRef.current || !canvasRef.current) return null;
+  
+
+  // ASYNCHRONOUS frame capture and encoding
+  const captureFrame = useCallback(async (): Promise<string | null> => {
+    if (!videoRef.current || !canvasRef.current || videoRef.current.readyState < videoRef.current.HAVE_ENOUGH_DATA) {
+      return null;
+    }
 
     const canvas = canvasRef.current;
     const video = videoRef.current;
-
-    if (video.readyState !== video.HAVE_ENOUGH_DATA) return null;
-
     const ctx = canvas.getContext('2d');
     if (!ctx) return null;
 
-    canvas.width = CAMERA_CONFIG.width;
-    canvas.height = CAMERA_CONFIG.height;
+    // Ensure canvas dimensions match video or desired capture size
+    if (canvas.width !== CAMERA_CONFIG.width || canvas.height !== CAMERA_CONFIG.height) {
+      canvas.width = CAMERA_CONFIG.width;
+      canvas.height = CAMERA_CONFIG.height;
+    }
+
+
     ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
 
-    return canvas.toDataURL('image/jpeg', 0.8).split(',')[1];
+    // Convert canvas to Blob asynchronously
+    return new Promise<string | null>((resolve) => {
+      canvas.toBlob(
+        async (blob) => {
+          if (blob) {
+            const base64 = await blobToBase64(blob);
+            resolve(base64);
+          } else {
+            resolve(null);
+          }
+        },
+        'image/jpeg', // MIME type
+        0.7 // Quality (adjust as needed, lower might be faster)
+      );
+    });
   }, []);
 
   useEffect(() => {
