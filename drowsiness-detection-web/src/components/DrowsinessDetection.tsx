@@ -12,14 +12,13 @@ export const DrowsinessDetection: React.FC = () => {
   const [sketchImage, setSketchImage] = useState<string | null>(null);
   const [fps, setFps] = useState(0);
 
-  const animationFrameRef = useRef<number | undefined>(undefined);
+  const animationFrameRef = useRef<number>();
   const frameCountRef = useRef<number>(0);
   const fpsUpdateTimeRef = useRef<number>(0);
-
   const isRunningRef = useRef<boolean>(false);
   const isConnectedRef = useRef<boolean>(false);
+  const isProcessingRef = useRef<boolean>(false);
 
-  // ← Sincronizar refs con estado
   useEffect(() => {
     isRunningRef.current = isRunning;
   }, [isRunning]);
@@ -28,32 +27,24 @@ export const DrowsinessDetection: React.FC = () => {
     isConnectedRef.current = isConnected;
   }, [isConnected]);
 
-  const FRAME_INTERVAL_MS = 100; // ~10 FPS, ajusta según sea necesario
-  let lastFrameTime = useRef(0);
-
-  const processFrame = useCallback(async () => { // Make processFrame async
-    const now = performance.now();
+  const processFrame = useCallback(() => {
     if (!isRunningRef.current || !isConnectedRef.current) {
-        // Still schedule next frame if not running/connected to allow restart
-        animationFrameRef.current = requestAnimationFrame(processFrame);
-        return;
+      animationFrameRef.current = requestAnimationFrame(processFrame);
+      return;
     }
 
-    // --- Throttling Logic ---
-    if (now - lastFrameTime.current < FRAME_INTERVAL_MS) {
-        // Not enough time passed, schedule next check and skip processing/sending
-        animationFrameRef.current = requestAnimationFrame(processFrame);
-        return;
+    if (isProcessingRef.current) {
+      animationFrameRef.current = requestAnimationFrame(processFrame);
+      return;
     }
-    lastFrameTime.current = now;
 
-    // Await the asynchronous frame capture and encoding
-    const frameBase64 = await captureFrame();
+    isProcessingRef.current = true;
+
+    const frameBase64 = captureFrame();
 
     if (frameBase64) {
       sendFrame(frameBase64);
 
-      // Contar FPS
       frameCountRef.current++;
       const currentTime = performance.now();
       const fpsElapsed = currentTime - fpsUpdateTimeRef.current;
@@ -64,68 +55,93 @@ export const DrowsinessDetection: React.FC = () => {
       }
     }
 
-    // Continuar loop
-    // Schedule the next frame processing
-    // Only request next frame *after* current one is processed and sent
-    if (isRunningRef.current) {
-      animationFrameRef.current = requestAnimationFrame(processFrame);
-    }
-  }, [captureFrame, sendFrame, FRAME_INTERVAL_MS]);
+    animationFrameRef.current = requestAnimationFrame(processFrame);
+  }, [captureFrame, sendFrame]);
 
   const handleStart = async () => {
     try {
+      console.log('🚀 Iniciando detección...');
+      
+      // Limpiar imágenes previas
+      setOriginalImage(null);
+      setSketchImage(null);
+      setFps(0);
+      frameCountRef.current = 0;
+      fpsUpdateTimeRef.current = performance.now();
+      
       await startCamera();
+      console.log('📹 Cámara iniciada');
+      
       connect();
+      console.log('🔌 WebSocket conectado');
+      
       setIsRunning(true);
       isRunningRef.current = true;
-      fpsUpdateTimeRef.current = performance.now();
-
-      // Wait a bit for the video to potentially stabilize
-      setTimeout(() => {
-        // Initial call to start the async loop
-        if (isRunningRef.current) {
-          processFrame(); // No need for requestAnimationFrame here, processFrame handles the loop
-        }
-      }, 500); // Adjust delay if needed
+      
+      // Esperar un frame adicional para asegurar que todo está listo
+      await new Promise(resolve => setTimeout(resolve, 100));
+      
+      animationFrameRef.current = requestAnimationFrame(processFrame);
+      console.log('Loop de procesamiento iniciado');
     } catch (err) {
-      console.error('Error al iniciar:', err);
+      console.error('❌ Error al iniciar:', err);
     }
   };
 
   const handleStop = () => {
+    console.log('🛑 Deteniendo detección...');
+    
     setIsRunning(false);
     isRunningRef.current = false;
+    isProcessingRef.current = false;
+    
+    // Detener loop inmediatamente
     if (animationFrameRef.current) {
       cancelAnimationFrame(animationFrameRef.current);
-      animationFrameRef.current = undefined; // Clear the ref
+      animationFrameRef.current = undefined;
     }
+    
+    // Detener cámara y WebSocket
     stopCamera();
     disconnect();
+    
+    // Limpiar estado visual
     setOriginalImage(null);
     setSketchImage(null);
     setFps(0);
+    frameCountRef.current = 0;
+    
+    console.log('Detección detenida completamente');
   };
 
   useEffect(() => {
     if (lastMessage) {
+      isProcessingRef.current = false;
+      
       if (lastMessage.error) {
         console.error('Error del servidor:', lastMessage.error);
       } else {
-        setOriginalImage(lastMessage.original_image);
-        setSketchImage(lastMessage.sketch_image);
+        // Actualizar solo si hay cambios
+        if (lastMessage.original_image !== originalImage) {
+          setOriginalImage(lastMessage.original_image);
+        }
+        if (lastMessage.sketch_image !== sketchImage) {
+          setSketchImage(lastMessage.sketch_image);
+        }
       }
     }
   }, [lastMessage]);
 
   useEffect(() => {
     return () => {
+      console.log('🧹 Limpieza al desmontar componente');
       if (animationFrameRef.current) {
         cancelAnimationFrame(animationFrameRef.current);
       }
       stopCamera();
-      disconnect(); // Ensure disconnect is called on unmount too
+      disconnect();
     };
-  }, [stopCamera, disconnect]); // Add disconnect dependency
+  }, [stopCamera, disconnect]);
 
   const error = cameraError || wsError;
 
@@ -164,10 +180,11 @@ export const DrowsinessDetection: React.FC = () => {
         <button
           onClick={handleStart}
           disabled={isRunning}
-          className={`px-8 py-3 rounded-lg font-bold text-white text-lg transition-all transform hover:scale-105 ${isRunning
-            ? 'bg-gray-600 cursor-not-allowed'
-            : 'bg-green-600 hover:bg-green-700 shadow-lg'
-            }`}
+          className={`px-8 py-3 rounded-lg font-bold text-white text-lg transition-all transform hover:scale-105 ${
+            isRunning
+              ? 'bg-gray-600 cursor-not-allowed'
+              : 'bg-green-600 hover:bg-green-700 shadow-lg'
+          }`}
         >
           {isRunning ? '🔴 Procesando...' : '▶️ Iniciar Detección'}
         </button>
@@ -175,10 +192,11 @@ export const DrowsinessDetection: React.FC = () => {
         <button
           onClick={handleStop}
           disabled={!isRunning}
-          className={`px-8 py-3 rounded-lg font-bold text-white text-lg transition-all transform hover:scale-105 ${!isRunning
-            ? 'bg-gray-600 cursor-not-allowed'
-            : 'bg-red-600 hover:bg-red-700 shadow-lg'
-            }`}
+          className={`px-8 py-3 rounded-lg font-bold text-white text-lg transition-all transform hover:scale-105 ${
+            !isRunning
+              ? 'bg-gray-600 cursor-not-allowed'
+              : 'bg-red-600 hover:bg-red-700 shadow-lg'
+          }`}
         >
           ⏹️ Detener
         </button>
@@ -187,15 +205,17 @@ export const DrowsinessDetection: React.FC = () => {
       <div className="flex gap-6 text-white bg-black/30 px-6 py-3 rounded-lg">
         <div className="flex items-center gap-2">
           <div
-            className={`w-3 h-3 rounded-full ${isCameraActive ? 'bg-green-500 animate-pulse' : 'bg-red-500'
-              }`}
+            className={`w-3 h-3 rounded-full ${
+              isCameraActive ? 'bg-green-500 animate-pulse' : 'bg-red-500'
+            }`}
           />
           <span className="text-sm">Cámara: {isCameraActive ? 'Activa' : 'Inactiva'}</span>
         </div>
         <div className="flex items-center gap-2">
           <div
-            className={`w-3 h-3 rounded-full ${isConnected ? 'bg-green-500 animate-pulse' : 'bg-red-500'
-              }`}
+            className={`w-3 h-3 rounded-full ${
+              isConnected ? 'bg-green-500 animate-pulse' : 'bg-red-500'
+            }`}
           />
           <span className="text-sm">Servidor: {isConnected ? 'Conectado' : 'Desconectado'}</span>
         </div>

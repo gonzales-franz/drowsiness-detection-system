@@ -1,4 +1,4 @@
-import React, { memo } from 'react';
+import React, { memo, useMemo } from 'react';
 
 interface VideoDisplayProps {
   imageBase64: string | null;
@@ -6,17 +6,29 @@ interface VideoDisplayProps {
 }
 
 export const VideoDisplay = memo<VideoDisplayProps>(({ imageBase64, title }) => {
+  // Evitar re-crear el src en cada render
+  const imageSrc = useMemo(() => {
+    if (!imageBase64) return null;
+    return `data:image/jpeg;base64,${imageBase64}`;
+  }, [imageBase64]);
+
   return (
     <div className="flex flex-col items-center space-y-4">
       <h3 className="text-xl font-bold text-white">{title}</h3>
       <div className="border-4 border-white/30 rounded-lg overflow-hidden shadow-2xl bg-gray-900">
-        {imageBase64 ? (
+        {imageSrc ? (
           <img
-            src={`data:image/jpeg;base64,${imageBase64}`}
+            src={imageSrc}
             alt={title}
             className="w-[640px] h-[480px] object-cover"
-            loading="eager" 
-            decoding="async" 
+            loading="eager"
+            decoding="async"
+            style={{
+              // Forzar hardware acceleration (elimina parpadeos)
+              transform: 'translateZ(0)',
+              willChange: 'contents',
+              imageRendering: 'crisp-edges',
+            }}
           />
         ) : (
           <div className="w-[640px] h-[480px] flex items-center justify-center text-gray-500">
@@ -41,6 +53,9 @@ export const VideoDisplay = memo<VideoDisplayProps>(({ imageBase64, title }) => 
       </div>
     </div>
   );
+}, (prevProps, nextProps) => {
+  // Comparación custom para evitar re-renders innecesarios
+  return prevProps.imageBase64 === nextProps.imageBase64 && prevProps.title === nextProps.title;
 });
 
 VideoDisplay.displayName = 'VideoDisplay';
