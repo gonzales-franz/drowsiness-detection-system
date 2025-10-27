@@ -12,12 +12,18 @@ export const DrowsinessDetection: React.FC = () => {
   const [sketchImage, setSketchImage] = useState<string | null>(null);
   const [fps, setFps] = useState(0);
 
-  const animationFrameRef = useRef<number>();
+  const animationFrameRef = useRef<number | undefined>();
   const frameCountRef = useRef<number>(0);
   const fpsUpdateTimeRef = useRef<number>(0);
   const isRunningRef = useRef<boolean>(false);
   const isConnectedRef = useRef<boolean>(false);
   const isProcessingRef = useRef<boolean>(false);
+  
+  // ← NUEVO: Buffer para imágenes pendientes
+  const pendingImageRef = useRef<{original: string | null, sketch: string | null}>({
+    original: null,
+    sketch: null
+  });
 
   useEffect(() => {
     isRunningRef.current = isRunning;
@@ -62,7 +68,6 @@ export const DrowsinessDetection: React.FC = () => {
     try {
       console.log('🚀 Iniciando detección...');
       
-      // Limpiar imágenes previas
       setOriginalImage(null);
       setSketchImage(null);
       setFps(0);
@@ -78,7 +83,6 @@ export const DrowsinessDetection: React.FC = () => {
       setIsRunning(true);
       isRunningRef.current = true;
       
-      // Esperar un frame adicional para asegurar que todo está listo
       await new Promise(resolve => setTimeout(resolve, 100));
       
       animationFrameRef.current = requestAnimationFrame(processFrame);
@@ -95,17 +99,14 @@ export const DrowsinessDetection: React.FC = () => {
     isRunningRef.current = false;
     isProcessingRef.current = false;
     
-    // Detener loop inmediatamente
     if (animationFrameRef.current) {
       cancelAnimationFrame(animationFrameRef.current);
       animationFrameRef.current = undefined;
     }
     
-    // Detener cámara y WebSocket
     stopCamera();
     disconnect();
     
-    // Limpiar estado visual
     setOriginalImage(null);
     setSketchImage(null);
     setFps(0);
@@ -114,6 +115,35 @@ export const DrowsinessDetection: React.FC = () => {
     console.log('Detección detenida completamente');
   };
 
+  // ← NUEVO: Usar requestAnimationFrame para actualizar UI
+  useEffect(() => {
+    let rafId: number;
+    
+    const updateUI = () => {
+      const pending = pendingImageRef.current;
+      
+      if (pending.original) {
+        setOriginalImage(pending.original);
+        pending.original = null;
+      }
+      
+      if (pending.sketch) {
+        setSketchImage(pending.sketch);
+        pending.sketch = null;
+      }
+      
+      rafId = requestAnimationFrame(updateUI);
+    };
+    
+    if (isRunning) {
+      rafId = requestAnimationFrame(updateUI);
+    }
+    
+    return () => {
+      if (rafId) cancelAnimationFrame(rafId);
+    };
+  }, [isRunning]);
+
   useEffect(() => {
     if (lastMessage) {
       isProcessingRef.current = false;
@@ -121,12 +151,12 @@ export const DrowsinessDetection: React.FC = () => {
       if (lastMessage.error) {
         console.error('Error del servidor:', lastMessage.error);
       } else {
-        // Actualizar solo si hay cambios
-        if (lastMessage.original_image !== originalImage) {
-          setOriginalImage(lastMessage.original_image);
+        // ← CAMBIO: Guardar en buffer en lugar de setState directo
+        if (lastMessage.original_image && lastMessage.original_image !== originalImage) {
+          pendingImageRef.current.original = lastMessage.original_image;
         }
-        if (lastMessage.sketch_image !== sketchImage) {
-          setSketchImage(lastMessage.sketch_image);
+        if (lastMessage.sketch_image && lastMessage.sketch_image !== sketchImage) {
+          pendingImageRef.current.sketch = lastMessage.sketch_image;
         }
       }
     }

@@ -1,4 +1,4 @@
-import React, { memo, useMemo } from 'react';
+import React, { memo, useRef, useEffect } from 'react';
 
 interface VideoDisplayProps {
   imageBase64: string | null;
@@ -6,27 +6,42 @@ interface VideoDisplayProps {
 }
 
 export const VideoDisplay = memo<VideoDisplayProps>(({ imageBase64, title }) => {
-  // Evitar re-crear el src en cada render
-  const imageSrc = useMemo(() => {
-    if (!imageBase64) return null;
-    return `data:image/jpeg;base64,${imageBase64}`;
+  const imgRef = useRef<HTMLImageElement>(null);
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+
+  useEffect(() => {
+    if (!imageBase64 || !canvasRef.current) return;
+
+    const canvas = canvasRef.current;
+    const ctx = canvas.getContext('2d', { 
+      alpha: false,
+      desynchronized: true // ← Clave para mejor performance
+    });
+    
+    if (!ctx) return;
+
+    const img = new Image();
+    img.onload = () => {
+      // Dibujar en canvas evita re-renders del DOM
+      ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+    };
+    
+    img.src = `data:image/jpeg;base64,${imageBase64}`;
   }, [imageBase64]);
 
   return (
     <div className="flex flex-col items-center space-y-4">
       <h3 className="text-xl font-bold text-white">{title}</h3>
       <div className="border-4 border-white/30 rounded-lg overflow-hidden shadow-2xl bg-gray-900">
-        {imageSrc ? (
-          <img
-            src={imageSrc}
-            alt={title}
-            className="w-[640px] h-[480px] object-cover"
-            loading="eager"
-            decoding="async"
+        {imageBase64 ? (
+          <canvas
+            ref={canvasRef}
+            width={640}
+            height={480}
             style={{
-              // Forzar hardware acceleration (elimina parpadeos)
-              transform: 'translateZ(0)',
-              willChange: 'contents',
+              display: 'block',
+              width: '640px',
+              height: '480px',
               imageRendering: 'crisp-edges',
             }}
           />
@@ -54,7 +69,6 @@ export const VideoDisplay = memo<VideoDisplayProps>(({ imageBase64, title }) => 
     </div>
   );
 }, (prevProps, nextProps) => {
-  // Comparación custom para evitar re-renders innecesarios
   return prevProps.imageBase64 === nextProps.imageBase64 && prevProps.title === nextProps.title;
 });
 
