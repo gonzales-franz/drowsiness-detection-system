@@ -38,12 +38,7 @@ export const VideoDisplay = memo<VideoDisplayProps>(({ imageBase64, title }) => 
             ref={canvasRef}
             width={640}
             height={480}
-            style={{
-              display: 'block',
-              width: '640px',
-              height: '480px',
-              imageRendering: 'crisp-edges',
-            }}
+            className="block w-[640px] h-[480px] [image-rendering:crisp-edges]"
           />
         ) : (
           <div className="w-[640px] h-[480px] flex items-center justify-center text-gray-500">
